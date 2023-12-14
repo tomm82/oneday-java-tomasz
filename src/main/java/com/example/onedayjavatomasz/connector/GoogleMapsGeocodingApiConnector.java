@@ -1,17 +1,20 @@
 package com.example.onedayjavatomasz.connector;
 
+import com.jayway.jsonpath.JsonPath;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.util.List;
 import java.util.Map;
 
 @Component
 public class GoogleMapsGeocodingApiConnector implements GeocodingApiConnector {
 
+    public static final String QUERY_PARAMETER_ADDRESS = "address";
+    public static final String QUERY_PARAMETER_API_KEY = "key";
+    public static final String LATITUDE = "latitude";
+    public static final String LONGITUDE = "longitude";
     @Value("${google.api.key}")
     private String apiKey;
 
@@ -24,26 +27,27 @@ public class GoogleMapsGeocodingApiConnector implements GeocodingApiConnector {
         this.restTemplate = restTemplate;
     }
 
-    public Map<String, Object> getLocation(String address) {
-        String uriString = UriComponentsBuilder.fromUriString(baseUrl)
-                .queryParam("address", address)
-                .queryParam("key", apiKey).toUriString();
+    public Map<String, Double> getLocation(String address) {
+        String uriString = prepareUri(address);
         System.out.println(uriString);
-        var response = restTemplate.getForEntity(uriString, Map.class);
-        if (response.getStatusCode().is2xxSuccessful()) {
-            return getLocationFromResponseBody(response);
+        var response = restTemplate.getForEntity(uriString, String.class);
+        if (response.getStatusCode().is2xxSuccessful() && response.hasBody()) {
+            return getLocationFromResponseBody(response.getBody());
         }
         throw new RuntimeException("Missing response");
     }
 
-    private static Map<String, Object> getLocationFromResponseBody(ResponseEntity<Map> response) {
-        Map<String, Object> responseBody = response.getBody();
-        if (!((List)responseBody.get("results")).isEmpty()) {
-            Map<String, Object> firstResult = (Map<String, Object>) ((List)responseBody.get("results")).get(0);
-            Map<String, Object> geometry = (Map<String, Object>) firstResult.get("geometry");
-            return  (Map<String, Object>) geometry.get("location");
-        }
-        return Map.of();
+    private String prepareUri(String address) {
+        String uriString = UriComponentsBuilder.fromUriString(baseUrl)
+                .queryParam(QUERY_PARAMETER_ADDRESS, address)
+                .queryParam(QUERY_PARAMETER_API_KEY, apiKey).toUriString();
+        return uriString;
+    }
+
+    private static Map<String, Double> getLocationFromResponseBody(String body) {
+        Double latitude = JsonPath.parse(body).read("$.results[0].geometry.location.lat");
+        Double longitude = JsonPath.parse(body).read("$.results[0].geometry.location.lng");
+        return Map.of(LATITUDE, latitude, LONGITUDE, longitude);
     }
 
 }

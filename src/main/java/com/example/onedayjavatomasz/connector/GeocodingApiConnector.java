@@ -9,5 +9,5 @@ public interface GeocodingApiConnector {
      * @param address address as a one line string
      * @return map with latitude as key and longitude as value
      */
-    Map<String, Object> getLocation(String address);
+    Map<String, Double> getLocation(String address);
 }

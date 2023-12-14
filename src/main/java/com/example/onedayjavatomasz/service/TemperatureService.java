@@ -2,18 +2,17 @@ package com.example.onedayjavatomasz.service;
 
 import com.example.onedayjavatomasz.connector.ElevationApiConnector;
 import com.example.onedayjavatomasz.connector.GeocodingApiConnector;
+import com.example.onedayjavatomasz.domain.Address;
 import com.example.onedayjavatomasz.domain.Offset;
 import com.example.onedayjavatomasz.domain.Temperature;
 import com.example.onedayjavatomasz.dto.AddressRequest;
 import com.example.onedayjavatomasz.dto.TemperatureResponse;
+import com.example.onedayjavatomasz.mapper.InboundMapper;
 import com.example.onedayjavatomasz.repository.OffsetsRepository;
 import com.example.onedayjavatomasz.repository.TemperatureRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class TemperatureService implements TemperatureApiService {
@@ -25,23 +24,28 @@ public class TemperatureService implements TemperatureApiService {
 
     private final OffsetsRepository offsetsRepository;
 
+    private final InboundMapper inboundMapper;
+
 
     public TemperatureService(GeocodingApiConnector geocodingApiConnector, ElevationApiConnector elevationApiConnector,
-                              TemperatureRepository temperatureRepository, OffsetsRepository offsetsRepository) {
+                              TemperatureRepository temperatureRepository, OffsetsRepository offsetsRepository, InboundMapper inboundMapper) {
         this.geocodingApiConnector = geocodingApiConnector;
         this.elevationApiConnector = elevationApiConnector;
         this.temperatureRepository = temperatureRepository;
         this.offsetsRepository = offsetsRepository;
+        this.inboundMapper = inboundMapper;
     }
 
     @Override
     public TemperatureResponse getTemperatureResponse(AddressRequest addressRequest) {
-        var address = getAddressFromAddressRequest(addressRequest);
+        var address = inboundMapper.getAddressFromAddressRequest(addressRequest);
         var defaultTemperature = getDefaultTemperatureForGivenAddress(address);
         var elevation = getElevationForGivenAddress(address);
         var offsetList = offsetsRepository.findAllOffsetsForGivenElevation(elevation);
         return calculateProperTemperature(defaultTemperature, elevation, offsetList);
     }
+
+
 
     private TemperatureResponse calculateProperTemperature(Double defaultTemperature, Double elevation, List<Offset> offsetList) {
         if (offsetList.isEmpty()) {
@@ -59,38 +63,21 @@ public class TemperatureService implements TemperatureApiService {
         }
     }
 
-    private String getAddressFromAddressRequest(AddressRequest addressRequest) {
-        return Optional.ofNullable(addressRequest.oneLineAddress())
-                .or(() -> parseMultilineAddress(addressRequest))
-                .orElseThrow(() -> new IllegalArgumentException("One line address and multiline address is missing"));
-    }
 
-    private Optional<? extends String> parseMultilineAddress(AddressRequest addressRequest) {
-        return Optional.of(String.join(", ", addressRequest.streetAddress(),
-                addressRequest.postalCode() + " " +  addressRequest.city(),
-                addressRequest.country()));
-    }
 
-    private Double getDefaultTemperatureForGivenAddress(String address) {
-        var postcode = parsePostCodeFromOneLineAddress(address);
-
-        return temperatureRepository.findByPostalCode(postcode)
+    private Double getDefaultTemperatureForGivenAddress(Address address) {
+        String postCode = address.getPostalCode();
+        return temperatureRepository.findByPostalCode(postCode)
                 .map(Temperature::getTemperature)
-                .orElseThrow(() -> new RuntimeException("Default temperature for given code not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Default temperature for given postal code not found"));
     }
 
-    private Double getElevationForGivenAddress(String address) {
-        var locationMap = geocodingApiConnector.getLocation(address);
-        var location = String.format("%s,%s", locationMap.get("lat"), locationMap.get("lng"));
+    private Double getElevationForGivenAddress(Address address) {
+        String addressAsOneLine = String.format("%s, %s %s, %s", address.getStreetAddress(), address.getPostalCode(),
+                address.getCity(), address.getCountry());
+        var locationMap = geocodingApiConnector.getLocation(addressAsOneLine);
+        var location = String.format("%s,%s", locationMap.get("latitude"), locationMap.get("longitude"));
         return elevationApiConnector.getElevation(location);
     }
 
-    private String parsePostCodeFromOneLineAddress(String address) {
-        Pattern pattern = Pattern.compile("\\b\\d{2}\\b");
-        Matcher matcher = pattern.matcher(address);
-        if (matcher.find()) {
-            return matcher.group();
-        }
-        throw new IllegalArgumentException("Post code not found in the address:" + address);
-    }
 }
